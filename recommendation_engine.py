@@ -7,7 +7,7 @@ MVP2 knowledge base, plus the user's two requested additions:
   - a "best overall for your workload, irrespective of budget" recommendation
 
 Stage A — Hard filter (budget, weight, RAM, ports, OS, workload fit)
-Stage B — Fit scoring (performance, battery, display, portability,
+Stage B — Fit scoring (performance, display, portability,
            connectivity, upgradeability, service, brand/colour), weighted
            by user-supplied weights
 Stage C — RAG evidence (pulls supporting chunks from the MVP2 knowledge base)
@@ -20,7 +20,6 @@ Run: python3 recommendation_engine.py
 
 import sqlite3
 import pickle
-import chromadb
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # project root (parent of src/)
@@ -32,7 +31,6 @@ GPU_HEAVY_WORKLOADS = {"gaming", "content_creation", "ml_dl", "cad_engineering"}
 
 DEFAULT_WEIGHTS = {
     "performance": 0.30,
-    "battery": 0.15,
     "display": 0.10,
     "portability": 0.15,
     "connectivity": 0.10,
@@ -58,6 +56,7 @@ def load_laptops():
 
 
 def load_kb():
+    import chromadb  # only the knowledge base needs it; the catalogue works without
     client = chromadb.PersistentClient(path=CHROMA_PATH)
     collection = client.get_collection(COLLECTION_NAME)
     with open(f"{CHROMA_PATH}/vectorizer.pkl", "rb") as f:
@@ -66,6 +65,8 @@ def load_kb():
 
 
 def kb_query(collection, vectorizer, question, k=2, collection_filter=None):
+    if collection is None:  # knowledge base not built yet -> no evidence, never invented
+        return []
     q_vec = vectorizer.transform([question]).toarray().tolist()
     where = {"collection": collection_filter} if collection_filter else None
     results = collection.query(query_embeddings=q_vec, n_results=k, where=where)
@@ -108,7 +109,7 @@ def hard_filter(laptops, req, ignore_budget=False):
         if req.get("os") and req["os"].lower() not in os.lower():
             reasons.append(f"OS mismatch ({os or 'unknown'})")
         for w in req.get("required_workloads", []):
-            if w not in l["workload_tags_list"]:
+            if l["workload_tags_list"] and w not in l["workload_tags_list"]:  # untagged = unknown, not unsuitable
                 reasons.append(f"not well-suited for '{w}'")
         if reasons:
             rejected.append({**l, "reasons": reasons})
@@ -247,7 +248,6 @@ def score_candidates(candidates, req, weights=None):
     gpu_heavy = bool(workloads & GPU_HEAVY_WORKLOADS)
 
     perf = _performance_score(candidates, gpu_heavy)
-    battery = _minmax_known([_num(c.get("battery_life_claimed_hrs")) for c in candidates])
     brightness = _minmax_known([_num(c.get("display_brightness_nits")) for c in candidates])
     refresh = _minmax_known([_num(c.get("display_refresh_hz")) for c in candidates])
     portability = _minmax_known([_num(c.get("weight_kg")) for c in candidates],
@@ -303,7 +303,6 @@ def score_candidates(candidates, req, weights=None):
 
         dims = {
             "performance": perf[i],
-            "battery": battery[i],
             "display": display_score,
             "portability": portability[i],
             "connectivity": ports[i],

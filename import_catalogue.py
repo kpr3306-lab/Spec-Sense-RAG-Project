@@ -1,7 +1,6 @@
 """Validated bulk-add of exact SKUs.  python3 import_catalogue.py new_skus.csv [--apply]
 Without --apply it only reports problems. Blank cells stay NULL (unknown); 0 in a spec column that can't be 0 is rejected."""
 import csv, sqlite3, sys
-from pathlib import Path
 from recommendation_engine import DB_PATH
 REQUIRED = ["sku_id", "brand", "model_name", "region", "source_url", "last_verified_date", "exact_config_verified"]
 NOT_ZERO = ["ram_gb", "storage_gb", "weight_kg", "battery_wh", "display_size_in", "display_brightness_nits", "display_refresh_hz", "cpu_cores"]

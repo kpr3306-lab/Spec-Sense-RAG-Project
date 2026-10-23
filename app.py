@@ -11,7 +11,10 @@ st.set_page_config(page_title="SpecSense", page_icon=":material/laptop_mac:", la
 
 @st.cache_resource
 def kb_resources():
-    return R.load_kb()
+    try:
+        return R.load_kb()
+    except Exception:  # knowledge base not built here (or chromadb missing): recommendations still work, no evidence
+        return None, None
 
 def laptops():  # not cached: price edits must show immediately
     return R.load_laptops()
@@ -19,11 +22,13 @@ def laptops():  # not cached: price edits must show immediately
 L = laptops()
 kb, vec = kb_resources()
 unk = lambda v, suf="": "unknown" if v is None or v == "" or (isinstance(v, float) and pd.isna(v)) else f"{v:g}{suf}" if isinstance(v, (int, float)) else f"{v}{suf}"
+known = lambda *parts, sep=" ": sep.join(p for p in parts if p != "unknown") or "unknown"  # '16" unknown unknown' -> '16"'
 inr = lambda v: "price unknown" if not v else f"₹{v:,.0f}"
+stars = lambda l: f"★ {l['rating']:g} ({l.get('rating_count') or 0:,.0f} ratings)" if l.get("rating") else "No rating available"
 WORKLOADS = {"coding_dev": "Coding / dev", "student_general": "Student / general", "content_creation": "Content creation",
              "gaming": "Gaming", "ml_dl": "ML / deep learning", "cad_engineering": "CAD / engineering",
              "business_thin_light": "Business / thin & light", "budget": "Budget"}
-DIMS = {"performance": "Performance", "battery": "Battery", "display": "Display", "portability": "Portability",
+DIMS = {"performance": "Performance", "display": "Display", "portability": "Portability",
         "connectivity": "Ports", "upgradeability": "Upgradeability", "service": "Service", "brand_colour": "Brand/colour"}
 
 SPEC_INFO = {
@@ -114,18 +119,6 @@ SPEC_INFO = {
             ("Depth", "dimensions_depth_mm", " mm"),
             ("Thickness", "dimensions_thickness_mm", " mm"),
             ("Build material", "build_material", ""),
-        ],
-    },
-    "battery": {
-        "purpose": "Watt-hours (Wh) describe battery capacity, not guaranteed runtime. Actual hours depend on "
-                   "screen brightness, workload, power settings, and battery condition. Prefer independent "
-                   "tested runtime when available; manufacturer claims may use different test conditions.",
-        "fields": [
-            ("Capacity", "battery_wh", " Wh"),
-            ("Manufacturer-claimed runtime", "battery_life_claimed_hrs", " hr"),
-            ("Independently tested runtime", "tested_battery_hrs", " hr"),
-            ("USB-C charging", "usb_c_charging", ""),
-            ("Fast charging", "fast_charging", ""),
         ],
     },
     "ports": {
@@ -250,13 +243,17 @@ def render_spec(container, laptop, card_index, key, label, value):
         if "note" in info:
             st.caption(info["note"])
 
-st.markdown('<div class="ss-hero"><h1><span style="color:#38bdf8">'+icon("laptop",30)+'</span> SpecSense</h1><p>Describe what you do — not processor names. Every number comes from the catalogue; unknown stays unknown.</p></div>', unsafe_allow_html=True)
 priced = sum(1 for l in L if l["observed_price_inr"] or l["msrp_inr"])
+checked = max((l["price_last_checked_date"] for l in L if l.get("price_last_checked_date")), default=None)
+st.markdown('<div class="ss-hero"><h1><span style="color:#38bdf8">'+icon("laptop",30)+'</span> SpecSense</h1><p>Describe what you do — not processor names. Every number comes from the catalogue; unknown stays unknown.</p>'
+            f'<span class="ss-chip">{icon("laptop",13)} {len(L)} laptops</span><span class="ss-chip">{icon("tag",13)} {priced} with a current price'
+            + (f' · checked {checked}' if checked else '') + f'</span><span class="ss-chip">★ {sum(1 for l in L if l.get("rating"))} rated</span>'
+            + ('' if kb is not None else '<span class="ss-chip">knowledge base not built — no evidence snippets</span>') + '</div>', unsafe_allow_html=True)
 if priced == 0:
     st.warning("No laptop in the catalogue has a price yet, so the **budget filter can't exclude anything**. "
                "Add prices in the *Catalogue & prices* tab.")
 
-tab_find, tab_cmp, tab_cat, tab_dq, tab_learn = st.tabs([":material/search: Find my laptop", ":material/compare_arrows: Compare", ":material/table_chart: Catalogue & prices", ":material/fact_check: Data quality", ":material/menu_book: Learn"])
+tab_find, tab_search, tab_cmp, tab_cat, tab_dq, tab_learn = st.tabs([":material/search: Find my laptop", ":material/manage_search: Model search", ":material/compare_arrows: Compare", ":material/table_chart: Catalogue & prices", ":material/fact_check: Data quality", ":material/menu_book: Learn"])
 
 # ---------------------------------------------------------------- Find
 with tab_find:
@@ -269,7 +266,7 @@ with tab_find:
         ram = c2.selectbox("Minimum RAM (GB)", [0, 8, 16, 32], index=2)
         usb_a = c3.checkbox("Must have USB-A")
         slots = c3.selectbox("Min SSD slots", [0, 1, 2])
-        brands = c3.multiselect("Preferred brands", sorted({l["brand"] for l in L}))
+        brands = c3.multiselect("Preferred brands", sorted({l["brand"] for l in L if l["brand"]}))
         colours = c3.multiselect("Preferred colours", sorted({l["colour"] for l in L if l["colour"]}))
         with st.expander("Accessory needs & scoring weights"):
             a1, a2, a3 = st.columns(3)
@@ -317,27 +314,28 @@ with tab_find:
                     h0.markdown(laptop_placeholder(), unsafe_allow_html=True)
                 price = c['observed_price_inr'] or c['msrp_inr']
                 pdate = f" · {c['price_last_checked_date']}" if c.get("observed_price_inr") and c.get("price_last_checked_date") else ""
-                h1.markdown(f'<div class="ss-title"><span class="ss-rank">#{i}</span>{html.escape(c["brand"])} {html.escape(c["model_name"])}</div>'
+                buy = c.get("price_source_url")
+                h1.markdown(f'<div class="ss-title"><span class="ss-rank">#{i}</span>{html.escape(c["brand"] or "")} {html.escape(c["model_name"])}</div>'
                             f'<div class="ss-sub">SKU {html.escape(str(c["sku_id"]))}</div>'
                             f'<span class="ss-chip">{icon("palette",13)} {html.escape(unk(c["colour"]))}</span>'
                             f'<span class="ss-chip">{icon("tag",13)} {inr(price)}{html.escape(pdate)}</span>'
-                            f'<span class="ss-chip">{icon("shield",13)} confidence {html.escape(unk(c["confidence"]))}</span>', unsafe_allow_html=True)
+                            f'<span class="ss-chip">{html.escape(stars(c))}</span>'
+                            f'<span class="ss-chip">{icon("shield",13)} confidence {html.escape(unk(c["confidence"]))}</span>'
+                            + (f'<a class="ss-chip" href="{html.escape(buy)}" target="_blank">View on {html.escape(c.get("retailer_name") or "store")} ↗</a>' if buy else ""),
+                            unsafe_allow_html=True)
                 if c.get("price_note"): h1.caption("Price note: " + c["price_note"])
                 h2.markdown(f'<div class="ss-score"><div class="lab">Fit score</div><div class="num {tone(c["fit_score"])}">{c["fit_score"]:.0f}<span style="font-size:1rem;opacity:.5">/100</span></div>'
                             f'<div class="cov">{c["score_coverage"]:.0%} of dimensions known</div></div>', unsafe_allow_html=True)
                 s1, s2, s3 = st.columns(3)
                 render_spec(s1, c, i, "cpu", "CPU", unk(c["cpu_model"]))
                 render_spec(s1, c, i, "gpu", "GPU", unk(c["gpu_model"]))
-                render_spec(s1, c, i, "ram", "RAM", f"{unk(c['ram_gb'], ' GB')} {unk(c['ram_type'])}")
-                render_spec(s2, c, i, "storage", "Storage",
-                            f"{unk(c['storage_gb'], ' GB')} {unk(c['storage_type'])}")
-                render_spec(s2, c, i, "display", "Display",
-                            f"{unk(c['display_size_in'], '\"')} {unk(c['display_resolution'])} "
-                            f"{unk(c['display_panel_type'])}")
+                render_spec(s1, c, i, "ram", "RAM", known(unk(c['ram_gb'], ' GB'), unk(c['ram_type'])))
+                render_spec(s2, c, i, "storage", "Storage", known(unk(c['storage_gb'], ' GB'), unk(c['storage_type'])))
+                render_spec(s2, c, i, "display", "Display", known(unk(c['display_size_in'], '"'),
+                            unk(c['display_resolution']), unk(c['display_panel_type'])))
                 render_spec(s2, c, i, "weight", "Weight", unk(c["weight_kg"], " kg"))
-                render_spec(s3, c, i, "battery", "Battery", unk(c["battery_wh"], " Wh"))
                 render_spec(s3, c, i, "ports", "Ports",
-                            f"USB-A {unk(c['usb_a_count'])} · USB-C {unk(c['usb_c_count'])}")
+                            known(unk(c['usb_a_count'], '× USB-A'), unk(c['usb_c_count'], '× USB-C'), sep=" · "))
                 render_spec(s3, c, i, "warranty", "Warranty", unk(c["warranty_years"], " yr"))
                 st.markdown('<div class="ss-sec">How it fits you</div>' + bars_html(c["dims"]), unsafe_allow_html=True)
                 ps = scores.all_scores(c)
@@ -362,22 +360,45 @@ with tab_find:
             for t in res["tradeoffs"]: st.write("• " + t)
         s = res["smart"]
         if s:
-            st.success(f"**Smart pick (ignores budget):** {s['brand']} {s['model_name']} — workload fit {s['workload_perf_score']}/100, {inr(s['observed_price_inr'] or s['msrp_inr'])}"
+            st.success(f"**Smart pick (ignores budget):** {s['brand'] or ''} {s['model_name']} — workload fit {s['workload_perf_score']}/100, {inr(s['observed_price_inr'] or s['msrp_inr'])}"
                        + (f". That is {s['over_budget_pct']:.0f}% over your budget." if s["over_budget_pct"] else ""))
+
+# ---------------------------------------------------------------- Model search
+with tab_search:
+    q = st.text_input("Search a model or SKU", placeholder="e.g. Victus, MacBook Air M5, IdeaPad Slim 3, 15-fd0262TU, COMHGWQESQN4BAHV")
+    if q:
+        groups = api.variants(L, q)
+        if not groups:
+            st.info("No laptop matches all of those words. Try fewer words, or just the series name.")
+        else:
+            st.caption(f"{sum(len(v) for _, v in groups)} variants of {len(groups)} model(s), cheapest first. "
+                       "Prices are current selling prices (not MRP).")
+        for name, vs in groups:
+            known = [v["observed_price_inr"] for v in vs if v.get("observed_price_inr")]
+            span = f"{inr(min(known))} – {inr(max(known))}" if known else "price unknown"
+            with st.expander(f"**{name}** · {len(vs)} variant(s) · {span}", expanded=len(groups) <= 3):
+                st.dataframe(pd.DataFrame([{
+                    "Variant": v["model_name"], "CPU": unk(v["cpu_model"]), "RAM": unk(v["ram_gb"], " GB"),
+                    "Storage": f"{unk(v['storage_gb'], ' GB')} {v['storage_type'] or ''}".strip(), "GPU": unk(v["gpu_model"]),
+                    "Display": unk(v["display_size_in"], '"'), "OS": unk(v["os"]), "Price ₹": v["observed_price_inr"] or v["msrp_inr"],
+                    "Rating": stars(v), "SKU": v["sku_id"], "Link": v.get("price_source_url") or v.get("source_url"),
+                } for v in vs]), hide_index=True, width="stretch",
+                    column_config={"Price ₹": st.column_config.NumberColumn(format="₹%d"),
+                                   "Link": st.column_config.LinkColumn(display_text="Open ↗")})
 
 # ---------------------------------------------------------------- Compare
 with tab_cmp:
-    names = {f"{l['brand']} {l['model_name']} [{l['sku_id']}]": l for l in L}
+    names = {f"{l['brand'] or ''} {l['model_name']} [{l['sku_id']}]".strip(): l for l in L}
     pick = st.multiselect("Pick 2–3 exact SKUs", list(names), max_selections=3)
     if len(pick) >= 2:
-        rows = [("Price", "observed_price_inr", None), ("CPU", "cpu_model", None), ("GPU VRAM (GB)", "gpu_vram_gb", 1),
+        rows = [("Price", "observed_price_inr", None), ("Rating", "rating", 1), ("CPU", "cpu_model", None), ("GPU VRAM (GB)", "gpu_vram_gb", 1),
                 ("RAM (GB)", "ram_gb", 1), ("Storage (GB)", "storage_gb", 1), ("Display refresh (Hz)", "display_refresh_hz", 1),
                 ("Brightness (nits)", "display_brightness_nits", 1), ("Weight (kg)", "weight_kg", -1), ("Battery (Wh)", "battery_wh", 1),
                 ("USB-A ports", "usb_a_count", 1), ("USB-C ports", "usb_c_count", 1), ("Warranty (yr)", "warranty_years", 1)]
         data = {}
         for label, col, direction in rows:
             vals = [names[p].get(col) for p in pick]
-            cells = [unk(v) for v in vals]
+            cells = [stars(names[p]) if col == "rating" else unk(v) for v, p in zip(vals, pick)]
             nums = [v for v in vals if isinstance(v, (int, float)) and not pd.isna(v)]
             if direction and len(nums) == len(vals) and len(set(nums)) > 1:  # only crown a winner when ALL are known
                 best = max(nums) if direction == 1 else min(nums)
@@ -390,8 +411,9 @@ with tab_cmp:
 # ---------------------------------------------------------------- Catalogue
 with tab_cat:
     df = pd.DataFrame(L)
-    show = df[["sku_id", "brand", "model_name", "colour", "ram_gb", "weight_kg", "gpu_model", "observed_price_inr", "data_confidence_score", "last_verified_date"]]
-    st.dataframe(show, width='stretch', hide_index=True)
+    df["rating_text"] = [stars(l) for l in L]
+    show = df[["sku_id", "brand", "model_name", "colour", "ram_gb", "weight_kg", "gpu_model", "observed_price_inr", "rating_text", "data_confidence_score", "last_verified_date"]]
+    st.dataframe(show, width='stretch', hide_index=True, column_config={"observed_price_inr": st.column_config.NumberColumn("Current price ₹", format="₹%d"), "rating_text": "Rating"})
     st.markdown("#### Prices")
     st.caption("Edit directly (price, retailer, product URL, date seen). A price is only saved with a URL and a date, so every number stays traceable.")
     ed = pd.DataFrame(L)[["sku_id", "model_name", "observed_price_inr", "retailer_name", "price_source_url", "price_last_checked_date"]]
@@ -429,6 +451,8 @@ with tab_dq:
 # ---------------------------------------------------------------- Learn
 with tab_learn:
     q = st.text_input("Ask about a term (e.g. TGP, NPU TOPS, soldered RAM, PPI)")
-    if q:
+    if kb is None:
+        st.info("The knowledge base isn't built on this machine yet (knowledge_base/ → `python ingest_kb.py`), so there is nothing to look up.")
+    elif q:
         for e in R.kb_query(kb, vec, q, k=3):
             st.markdown(f"**[{e['doc_id']}] {e['section']}**\n\n{e['text']}")

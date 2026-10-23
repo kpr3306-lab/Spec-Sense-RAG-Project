@@ -56,6 +56,21 @@ def run(laptops, req, kb, vec, top_n=4, weights=None):
     return res
 
 
+def variants(laptops, query):
+    """Model / SKU search: laptops whose SKU, brand or model contain every query word, plus all the other variants
+    (RAM, storage, CPU, GPU, colour) of the same model family. -> [(model, [laptops cheapest first])], biggest first."""
+    words = query.lower().split()
+    family = lambda l: (l.get("brand") or "", l.get("model_family") or l["model_name"])
+    hits = {family(l) for l in laptops
+            if words and all(w in f"{l['sku_id']} {l.get('brand') or ''} {l['model_name']}".lower() for w in words)}
+    price = lambda l: R._num(l.get("observed_price_inr")) or R._num(l.get("msrp_inr")) or float("inf")
+    groups = {}
+    for l in sorted(laptops, key=price):
+        if family(l) in hits:
+            groups.setdefault(family(l), []).append(l)
+    return sorted(((f"{b} {f}".strip(), ls) for (b, f), ls in groups.items()), key=lambda g: -len(g[1]))
+
+
 def save_price(sku, price, retailer, url, observed=None, note=None):
     """Touches only live-price columns. observed = date the price was seen (defaults to today)."""
     con = sqlite3.connect(R.DB_PATH)
