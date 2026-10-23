@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 import recommendation_engine as R
 
-OUT = Path(__file__).resolve().parent.parent / "data" / "images"
+OUT = Path(__file__).resolve().parent / "data" / "images"
 UA = {"User-Agent": "Mozilla/5.0 (SpecSense academic project)"}
 LISTING = re.compile(r"/listings/|/product-compare|/laptop-price/|\?(segment|graphics|memstd|processortype)=|processor_type-|/laptops/?$")
 

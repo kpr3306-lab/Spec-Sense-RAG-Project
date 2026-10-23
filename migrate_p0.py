@@ -1,7 +1,7 @@
 """Adds the roadmap's P0 columns (all NULL = unknown). Safe to re-run."""
 import sqlite3
 from pathlib import Path
-DB = Path(__file__).resolve().parent.parent / "data" / "specsense.db"
+DB = Path(__file__).resolve().parent / "data" / "specsense.db"
 P0 = {  # column: type
     "ram_layout": "TEXT",            # soldered / SO-DIMM / mixed / LPCAMM2
     "ram_channel_config": "TEXT",    # single / dual / flex / unknown

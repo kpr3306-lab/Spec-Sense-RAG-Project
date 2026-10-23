@@ -22,7 +22,7 @@ import sqlite3
 import pickle
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # project root (parent of src/)
+BASE_DIR = Path(__file__).resolve().parent  # project root
 DB_PATH = str(BASE_DIR / "data" / "specsense.db")
 CHROMA_PATH = str(BASE_DIR / "vector_store" / "chroma_db")
 COLLECTION_NAME = "specsense_kb"

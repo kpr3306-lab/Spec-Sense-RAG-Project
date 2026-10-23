@@ -1,4 +1,5 @@
-"""SpecSense frontend.  Run:  cd src && streamlit run app.py"""
+"""SpecSense frontend.  Run:  streamlit run app.py   (set SPECSENSE_EDIT=1 to allow price editing)"""
+import os
 import pandas as pd
 import streamlit as st
 import api
@@ -21,6 +22,7 @@ def laptops():  # not cached: price edits must show immediately
 
 L = laptops()
 kb, vec = kb_resources()
+EDITABLE = os.environ.get("SPECSENSE_EDIT") == "1"  # off when deployed: the cloud disk resets and anyone with the URL could edit
 unk = lambda v, suf="": "unknown" if v is None or v == "" or (isinstance(v, float) and pd.isna(v)) else f"{v:g}{suf}" if isinstance(v, (int, float)) else f"{v}{suf}"
 known = lambda *parts, sep=" ": sep.join(p for p in parts if p != "unknown") or "unknown"  # '16" unknown unknown' -> '16"'
 inr = lambda v: "price unknown" if not v else f"₹{v:,.0f}"
@@ -252,7 +254,7 @@ st.markdown('<div class="ss-hero"><h1><span style="color:#38bdf8">'+icon("laptop
             + ('' if kb is not None else '<span class="ss-chip">knowledge base not built — no evidence snippets</span>') + '</div>', unsafe_allow_html=True)
 if priced == 0:
     st.warning("No laptop in the catalogue has a price yet, so the **budget filter can't exclude anything**. "
-               "Add prices in the *Catalogue & prices* tab.")
+               "Add prices with the importers, or in the *Catalogue & prices* tab when running locally with SPECSENSE_EDIT=1.")
 
 tab_find, tab_search, tab_cmp, tab_cat, tab_learn = st.tabs([":material/search: Find my laptop", ":material/manage_search: Model search", ":material/compare_arrows: Compare", ":material/table_chart: Catalogue & prices", ":material/menu_book: Learn"])
 
@@ -303,7 +305,7 @@ with tab_find:
             with st.container(border=True):
                 h0, h1, h2 = st.columns([1.5, 4, 1.3], vertical_alignment="center")
                 img = None
-                if c.get("image_path") and Path("..", c["image_path"]).exists(): img = str(Path("..", c["image_path"]))
+                if c.get("image_path") and Path(R.BASE_DIR, c["image_path"]).exists(): img = str(Path(R.BASE_DIR, c["image_path"]))
                 elif c.get("image_primary_url"): img = c["image_primary_url"]
                 if img:
                     h0.image(img, width="stretch")
@@ -414,25 +416,26 @@ with tab_cat:
     df["rating_text"] = [stars(l) for l in L]
     show = df[["sku_id", "brand", "model_name", "colour", "ram_gb", "weight_kg", "gpu_model", "observed_price_inr", "rating_text", "last_verified_date"]]
     st.dataframe(show, width='stretch', hide_index=True, column_config={"observed_price_inr": st.column_config.NumberColumn("Current price ₹", format="₹%d"), "rating_text": "Rating"})
-    st.markdown("#### Prices")
-    st.caption("Edit directly (price, retailer, product URL, date seen). A price is only saved with a URL and a date, so every number stays traceable.")
-    ed = pd.DataFrame(L)[["sku_id", "model_name", "observed_price_inr", "retailer_name", "price_source_url", "price_last_checked_date"]]
-    edited = st.data_editor(ed, hide_index=True, width="stretch", disabled=["sku_id", "model_name"], key="price_editor",
-                            column_config={"observed_price_inr": st.column_config.NumberColumn("Price ₹", min_value=15000, max_value=600000, step=500, format="%d"),
-                                           "retailer_name": "Retailer", "price_source_url": st.column_config.LinkColumn("Product URL"),
-                                           "price_last_checked_date": "Date seen (YYYY-MM-DD)"})
-    if st.button("Save price changes", type="primary"):
-        changed, errors = 0, []
-        for (_, a_), (_, b_) in zip(ed.iterrows(), edited.iterrows()):
-            if a_.fillna("").tolist() == b_.fillna("").tolist(): continue
-            if pd.isna(b_["observed_price_inr"]): continue
-            if not str(b_["price_source_url"] or "").startswith("http") or not str(b_["price_last_checked_date"] or "")[:4].isdigit():
-                errors.append(f"{b_['sku_id']}: needs a product URL and a date"); continue
-            api.save_price(b_["sku_id"], float(b_["observed_price_inr"]), b_["retailer_name"], b_["price_source_url"], str(b_["price_last_checked_date"]))
-            changed += 1
-        for e in errors: st.error(e)
-        if changed: st.success(f"Saved {changed} price(s)."); st.rerun()
-    st.caption("Only the live-price columns are touched; verified spec fields are never overwritten.")
+    if EDITABLE:
+        st.markdown("#### Prices")
+        st.caption("Edit directly (price, retailer, product URL, date seen). A price is only saved with a URL and a date, so every number stays traceable.")
+        ed = pd.DataFrame(L)[["sku_id", "model_name", "observed_price_inr", "retailer_name", "price_source_url", "price_last_checked_date"]]
+        edited = st.data_editor(ed, hide_index=True, width="stretch", disabled=["sku_id", "model_name"], key="price_editor",
+                                column_config={"observed_price_inr": st.column_config.NumberColumn("Price ₹", min_value=15000, max_value=600000, step=500, format="%d"),
+                                               "retailer_name": "Retailer", "price_source_url": st.column_config.LinkColumn("Product URL"),
+                                               "price_last_checked_date": "Date seen (YYYY-MM-DD)"})
+        if st.button("Save price changes", type="primary"):
+            changed, errors = 0, []
+            for (_, a_), (_, b_) in zip(ed.iterrows(), edited.iterrows()):
+                if a_.fillna("").tolist() == b_.fillna("").tolist(): continue
+                if pd.isna(b_["observed_price_inr"]): continue
+                if not str(b_["price_source_url"] or "").startswith("http") or not str(b_["price_last_checked_date"] or "")[:4].isdigit():
+                    errors.append(f"{b_['sku_id']}: needs a product URL and a date"); continue
+                api.save_price(b_["sku_id"], float(b_["observed_price_inr"]), b_["retailer_name"], b_["price_source_url"], str(b_["price_last_checked_date"]))
+                changed += 1
+            for e in errors: st.error(e)
+            if changed: st.success(f"Saved {changed} price(s)."); st.rerun()
+        st.caption("Only the live-price columns are touched; verified spec fields are never overwritten.")
 
 # ---------------------------------------------------------------- Learn
 with tab_learn:

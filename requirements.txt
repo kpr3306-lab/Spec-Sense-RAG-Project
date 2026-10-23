@@ -1,6 +1,6 @@
-streamlit>=1.58.0
-pandas>=2.3.2
-requests>=2.32.5
-beautifulsoup4>=4.14.3
-scikit-learn>=1.8.0
-chromadb>=1.0.0
+streamlit==1.66.1
+pandas==3.1.0
+requests==2.34.2
+beautifulsoup4==4.15.0
+scikit-learn==1.9.1
+chromadb==1.5.9

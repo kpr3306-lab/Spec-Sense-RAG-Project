@@ -61,7 +61,7 @@ import urllib.error
 from datetime import date
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # project root (parent of src/)
+BASE_DIR = Path(__file__).resolve().parent  # project root
 DB_PATH = str(BASE_DIR / "data" / "specsense.db")
 SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
 MIN_PLAUSIBLE_INR = 15000

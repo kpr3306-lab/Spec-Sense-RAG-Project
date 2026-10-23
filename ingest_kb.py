@@ -23,7 +23,7 @@ import chromadb
 from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # project root (parent of src/)
+BASE_DIR = Path(__file__).resolve().parent  # project root
 KB_ROOT = str(BASE_DIR / "knowledge_base")
 DB_PATH = str(BASE_DIR / "vector_store" / "chroma_db")
 COLLECTION_NAME = "specsense_kb"
@@ -78,7 +78,7 @@ def load_all_chunks():
                     "source_date": meta.get("source_date", "unknown"),
                     "last_verified_date": meta.get("last_verified_date", "unknown"),
                     "confidence": meta.get("confidence", "unknown"),
-                    "file_path": path,
+                    "file_path": os.path.relpath(path, BASE_DIR),  # relative: the store gets deployed
                 }
             })
     return all_chunks
