@@ -97,6 +97,8 @@ def embed_chunks(chunks, vectorizer=None):
 
 def build_store():
     chunks = load_all_chunks()
+    if not chunks:
+        raise SystemExit(f"No knowledge base docs found: put the .md files under {KB_ROOT}")
     embeddings, vectorizer = embed_chunks(chunks)
 
     client = chromadb.PersistentClient(path=DB_PATH)
