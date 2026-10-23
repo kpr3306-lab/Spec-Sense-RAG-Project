@@ -177,7 +177,6 @@ st.markdown("""
 .ss-bar .n{width:7.5rem;opacity:.8}.ss-bar .t{flex:1;height:8px;border-radius:99px;background:rgba(125,140,170,.18);overflow:hidden}
 .ss-bar .f{height:100%;border-radius:99px;background:linear-gradient(90deg,#38bdf8,#818cf8)}
 .ss-bar .v{width:2.6rem;text-align:right;font-variant-numeric:tabular-nums;opacity:.75}
-.ss-bar.na .v{opacity:.45;font-style:italic}
 .ss-sec{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;opacity:.55;margin:1rem 0 .3rem;font-weight:650}
 .ss-pill{display:flex;justify-content:space-between;align-items:center;padding:.5rem .8rem;border-radius:12px;
   background:rgba(125,140,170,.10);border:1px solid rgba(125,140,170,.18);margin:.2rem 0;font-size:.86rem}
@@ -222,13 +221,12 @@ def bars_html(dims):
     out = []
     for k, label in DIMS.items():
         v = dims.get(k)
-        if v is None:
-            out.append(f'<div class="ss-bar na"><span class="n">{label}</span><span class="t"></span><span class="v">n/a</span></div>')
-        else:
+        if v is not None:
             out.append(f'<div class="ss-bar"><span class="n">{label}</span><span class="t"><span class="f" style="display:block;width:{v*100:.0f}%"></span></span><span class="v">{v*100:.0f}</span></div>')
     return "".join(out)
 
 def render_spec(container, laptop, card_index, key, label, value):
+    if value == "unknown": return
     text_col, info_col = container.columns([14, 1], vertical_alignment="center", gap="small")
     text_col.markdown(f'<div class="ss-spec"><b>{html.escape(label)}</b> {html.escape(str(value))}</div>', unsafe_allow_html=True)
     info = SPEC_INFO[key]
@@ -237,9 +235,12 @@ def render_spec(container, laptop, card_index, key, label, value):
         st.markdown(f"#### {label}")
         st.markdown(f"**Shown:** {value}")
         st.markdown(f"**Why it matters:** {info['purpose']}")
-        st.markdown("**Detailed specifications**")
-        for detail_label, field, suffix in info["fields"]:
-            st.markdown(f"- **{detail_label}:** {unk(laptop.get(field), suffix)}")
+        details = [(detail_label, unk(laptop.get(field), suffix)) for detail_label, field, suffix in info["fields"]]
+        details = [(detail_label, v) for detail_label, v in details if v != "unknown"]
+        if details:
+            st.markdown("**Detailed specifications**")
+            for detail_label, v in details:
+                st.markdown(f"- **{detail_label}:** {v}")
         if "note" in info:
             st.caption(info["note"])
 
@@ -253,7 +254,7 @@ if priced == 0:
     st.warning("No laptop in the catalogue has a price yet, so the **budget filter can't exclude anything**. "
                "Add prices in the *Catalogue & prices* tab.")
 
-tab_find, tab_search, tab_cmp, tab_cat, tab_dq, tab_learn = st.tabs([":material/search: Find my laptop", ":material/manage_search: Model search", ":material/compare_arrows: Compare", ":material/table_chart: Catalogue & prices", ":material/fact_check: Data quality", ":material/menu_book: Learn"])
+tab_find, tab_search, tab_cmp, tab_cat, tab_learn = st.tabs([":material/search: Find my laptop", ":material/manage_search: Model search", ":material/compare_arrows: Compare", ":material/table_chart: Catalogue & prices", ":material/menu_book: Learn"])
 
 # ---------------------------------------------------------------- Find
 with tab_find:
@@ -265,7 +266,6 @@ with tab_find:
         weight = c2.number_input("Max weight kg (0 = no limit)", 0.0, 4.0, 0.0, 0.1)
         ram = c2.selectbox("Minimum RAM (GB)", [0, 8, 16, 32], index=2)
         usb_a = c3.checkbox("Must have USB-A")
-        slots = c3.selectbox("Min SSD slots", [0, 1, 2])
         brands = c3.multiselect("Preferred brands", sorted({l["brand"] for l in L if l["brand"]}))
         colours = c3.multiselect("Preferred colours", sorted({l["colour"] for l in L if l["colour"]}))
         with st.expander("Accessory needs & scoring weights"):
@@ -283,7 +283,6 @@ with tab_find:
         if budget: req["budget_max"] = budget
         if weight: req["weight_max_kg"] = weight
         if ram: req["ram_min_gb"] = ram
-        if slots: req["min_storage_slots"] = slots
         tot = sum(wts.values()) or 1
         res = api.run(L, req, kb, vec, weights={k: v / tot for k, v in wts.items()})
         st.session_state["res"] = res
@@ -317,10 +316,10 @@ with tab_find:
                 buy = c.get("price_source_url")
                 h1.markdown(f'<div class="ss-title"><span class="ss-rank">#{i}</span>{html.escape(c["brand"] or "")} {html.escape(c["model_name"])}</div>'
                             f'<div class="ss-sub">SKU {html.escape(str(c["sku_id"]))}</div>'
-                            f'<span class="ss-chip">{icon("palette",13)} {html.escape(unk(c["colour"]))}</span>'
-                            f'<span class="ss-chip">{icon("tag",13)} {inr(price)}{html.escape(pdate)}</span>'
+                            + (f'<span class="ss-chip">{icon("palette",13)} {html.escape(c["colour"])}</span>' if c.get("colour") else "")
+                            + f'<span class="ss-chip">{icon("tag",13)} {inr(price)}{html.escape(pdate)}</span>'
                             f'<span class="ss-chip">{html.escape(stars(c))}</span>'
-                            f'<span class="ss-chip">{icon("shield",13)} confidence {html.escape(unk(c["confidence"]))}</span>'
+                            + (f'<span class="ss-chip">{icon("shield",13)} confidence {html.escape(str(c["confidence"]))}</span>' if c.get("confidence") else "")
                             + (f'<a class="ss-chip" href="{html.escape(buy)}" target="_blank">View on {html.escape(c.get("retailer_name") or "store")} ↗</a>' if buy else ""),
                             unsafe_allow_html=True)
                 if c.get("price_note"): h1.caption("Price note: " + c["price_note"])
@@ -338,11 +337,11 @@ with tab_find:
                             known(unk(c['usb_a_count'], '× USB-A'), unk(c['usb_c_count'], '× USB-C'), sep=" · "))
                 render_spec(s3, c, i, "warranty", "Warranty", unk(c["warranty_years"], " yr"))
                 st.markdown('<div class="ss-sec">How it fits you</div>' + bars_html(c["dims"]), unsafe_allow_html=True)
-                ps = scores.all_scores(c)
-                st.markdown('<div class="ss-sec">Persona scores</div>', unsafe_allow_html=True)
-                for col, (name, (val, cov)) in zip(st.columns(len(ps)), ps.items()):
-                    col.metric(name, f"{val}/100" if val is not None else "n/a",
-                               help=f"{cov:.0%} of inputs known" + ("" if val is not None else " — too little data to score; unknown is never counted as zero"))
+                ps = {k: v for k, v in scores.all_scores(c).items() if v[0] is not None}
+                if ps:
+                    st.markdown('<div class="ss-sec">Persona scores</div>', unsafe_allow_html=True)
+                    for col, (name, (val, cov)) in zip(st.columns(len(ps)), ps.items()):
+                        col.metric(name, f"{val}/100", help=f"{cov:.0%} of inputs known")
                 if c["weakest"]:
                     st.markdown(f'<div class="ss-why"><b>Why not?</b> Your biggest compromise is <b>{DIMS[c["weakest"]]}</b>.</div>', unsafe_allow_html=True)
                 if c["accessories"]:
@@ -354,7 +353,7 @@ with tab_find:
                     st.caption("Total setup: " + (f"₹{cost['must_spend_total']:,.0f} must-have · ₹{cost['fully_equipped_total']:,.0f} fully equipped" if cost["must_spend_total"] else f"laptop price unknown — accessories alone: ₹{cost['essential_accessories']:,} essential"))
                 with st.expander("Evidence & sources"):
                     for e in c["evidence"]: st.markdown(f"**[{e['doc_id']}] {e['section']}** — {e['text'][:400]}…")
-                    st.write(f"Source: {unk(c['source_url'])} · verified {unk(c['last_verified_date'])} · confidence {unk(c['confidence'])}")
+                    st.write(f"Source: {unk(c['source_url'])} · verified {unk(c['last_verified_date'])}" + (f" · confidence {c['confidence']}" if c.get("confidence") else ""))
         if res["tradeoffs"]:
             st.markdown("#### Trade-offs between your top two")
             for t in res["tradeoffs"]: st.write("• " + t)
@@ -398,6 +397,7 @@ with tab_cmp:
         data = {}
         for label, col, direction in rows:
             vals = [names[p].get(col) for p in pick]
+            if all(unk(v) == "unknown" for v in vals): continue
             cells = [stars(names[p]) if col == "rating" else unk(v) for v, p in zip(vals, pick)]
             nums = [v for v in vals if isinstance(v, (int, float)) and not pd.isna(v)]
             if direction and len(nums) == len(vals) and len(set(nums)) > 1:  # only crown a winner when ALL are known
@@ -412,7 +412,7 @@ with tab_cmp:
 with tab_cat:
     df = pd.DataFrame(L)
     df["rating_text"] = [stars(l) for l in L]
-    show = df[["sku_id", "brand", "model_name", "colour", "ram_gb", "weight_kg", "gpu_model", "observed_price_inr", "rating_text", "data_confidence_score", "last_verified_date"]]
+    show = df[["sku_id", "brand", "model_name", "colour", "ram_gb", "weight_kg", "gpu_model", "observed_price_inr", "rating_text", "last_verified_date"]]
     st.dataframe(show, width='stretch', hide_index=True, column_config={"observed_price_inr": st.column_config.NumberColumn("Current price ₹", format="₹%d"), "rating_text": "Rating"})
     st.markdown("#### Prices")
     st.caption("Edit directly (price, retailer, product URL, date seen). A price is only saved with a URL and a date, so every number stays traceable.")
@@ -433,20 +433,6 @@ with tab_cat:
         for e in errors: st.error(e)
         if changed: st.success(f"Saved {changed} price(s)."); st.rerun()
     st.caption("Only the live-price columns are touched; verified spec fields are never overwritten.")
-
-# ---------------------------------------------------------------- Data quality
-with tab_dq:
-    GROUPS = {"Price": ["observed_price_inr", "msrp_inr"], "RAM layout (P0)": ["ram_layout", "ram_channel_config", "ram_free_slots"],
-              "Storage slots (P0)": ["storage_free_slots", "storage_slots"], "Display (P0)": ["display_surface", "display_brightness_nits", "display_color_gamut"],
-              "Real battery test (P0)": ["tested_battery_hrs", "tested_battery_workload"], "Service (P0)": ["service_centre_evidence", "warranty_years", "warranty_type"],
-              "Ports": ["usb_a_count", "usb_c_count", "usb_c_pd_input_w"], "Verification": ["source_url", "last_verified_date", "exact_config_verified"]}
-    d = pd.DataFrame(L)
-    cov = {g: round(100 * d[cols].notna().all(axis=1).mean()) for g, cols in GROUPS.items()}
-    st.markdown(f"**{len(L)} SKUs.** Share of laptops with *every* field in each group filled:")
-    st.markdown("".join(f'<div class="ss-bar{" na" if v == 0 else ""}"><span class="n" style="width:11rem">{g}</span><span class="t"><span class="f" style="display:block;width:{v}%"></span></span><span class="v">{v}%</span></div>' for g, v in cov.items()), unsafe_allow_html=True)
-    low = d[d["confidence"] != "high"][["sku_id", "model_name", "confidence", "data_confidence_score"]]
-    if len(low): st.markdown("**Low/medium-confidence records to verify first**"); st.dataframe(low, hide_index=True, width="stretch")
-    st.caption("Add verified SKUs with `python3 import_catalogue.py new_skus.csv --apply` (template: data/catalogue_intake_template.csv).")
 
 # ---------------------------------------------------------------- Learn
 with tab_learn:
